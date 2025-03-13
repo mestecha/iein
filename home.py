@@ -78,22 +78,22 @@ class Home:
                        f"Updated {room}/{device}/{property_name} from '{old_value}' to '{value}'")
         return True
 
-    def update_security(self, security_item: str, property_name: str, value: Any) -> bool:
-        if security_item not in self.state["seguridad"]:
-            self.log_event("system", "error", f"Security item '{security_item}' not found")
-            return False
-        if property_name not in self.state["seguridad"][security_item]:
-            self.log_event("system", "error", f"Property '{property_name}' not found for '{security_item}'")
-            return False
+    # def update_security(self, security_item: str, property_name: str, value: Any) -> bool:
+    #     if security_item not in self.state["seguridad"]:
+    #         self.log_event("system", "error", f"Security item '{security_item}' not found")
+    #         return False
+    #     if property_name not in self.state["seguridad"][security_item]:
+    #         self.log_event("system", "error", f"Property '{property_name}' not found for '{security_item}'")
+    #         return False
         
-        if security_item == "puerta_principal" and property_name == "estado" and value in ["abierto", "desbloqueado"]:
-            self.state["seguridad"][security_item]["ultima_vez_accedido"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    #     if security_item == "puerta_principal" and property_name == "estado" and value in ["abierto", "desbloqueado"]:
+    #         self.state["seguridad"][security_item]["ultima_vez_accedido"] = time.strftime("%Y-%m-%d %H:%M:%S")
         
-        old_value = self.state["seguridad"][security_item][property_name]
-        self.state["seguridad"][security_item][property_name] = value
-        self.log_event("security", "updated",
-                       f"Updated seguridad/{security_item}/{property_name} from '{old_value}' to '{value}'")
-        return True
+    #     old_value = self.state["seguridad"][security_item][property_name]
+    #     self.state["seguridad"][security_item][property_name] = value
+    #     self.log_event("security", "updated",
+    #                    f"Updated seguridad/{security_item}/{property_name} from '{old_value}' to '{value}'")
+    #     return True
 
     def process_request(self, user_request: str, assistant_response: str = None) -> Dict[str, Any]:
         changes_made = {"success": False, "changes": [], "is_command": False}
@@ -240,48 +240,48 @@ class Home:
                                     re.IGNORECASE),
                 "action": lambda m: self.update_device("cocina", "horno", "temperatura_celsius", m.group("temp"))
             },
-            # Security - Main Door Open
-            {
-                "name": "door_main_open",
-                "regex": re.compile(prefix + r"(?:abre|desbloquea|desatranca)\s+(?:la\s+)?puerta\s+(?:principal|de\s+entrada|del\s+frente)",
-                                    re.IGNORECASE),
-                "action": lambda m: self.update_security("puerta_principal", "estado", "abierto")
-            },
-            # Security - Main Door Close
-            {
-                "name": "door_main_close",
-                "regex": re.compile(prefix + r"(?:cierra|bloquea|atranca|pon\s+seguro\s+a)\s+(?:la\s+)?puerta\s+(?:principal|de\s+entrada|del\s+frente)",
-                                    re.IGNORECASE),
-                "action": lambda m: self.update_security("puerta_principal", "estado", "cerrado")
-            },
-            # Security - Garage Door Open
-            {
-                "name": "door_garage_open",
-                "regex": re.compile(prefix + open_verbs + r"\s+" + articulo_opcional + r"(?:puerta\s+(?:del\s+|de\s+la\s+)?(?:garaje|cochera|estacionamiento|garage)|(?:garaje|cochera|estacionamiento|garage))",
-                                    re.IGNORECASE),
-                "action": lambda m: self.update_security("puerta_garaje", "estado", "abierto")
-            },
-            # Security - Garage Door Close
-            {
-                "name": "door_garage_close",
-                "regex": re.compile(prefix + close_verbs + r"\s+" + articulo_opcional + r"(?:puerta\s+(?:del\s+|de\s+la\s+)?(?:garaje|cochera|estacionamiento|garage)|(?:garaje|cochera|estacionamiento|garage))",
-                                    re.IGNORECASE),
-                "action": lambda m: self.update_security("puerta_garaje", "estado", "cerrado")
-            },
-            # Security - Alarm On
-            {
-                "name": "alarm_on",
-                "regex": re.compile(prefix + turnon_verbs + r"\s+" + articulo_opcional + r"(?:alarma|sistema\s+(?:de\s+)?(?:seguridad|alarma)|seguridad|vigilancia)",
-                                    re.IGNORECASE),
-                "action": lambda m: self.update_security("alarma", "estado", "encendido")
-            },
-            # Security - Alarm Off
-            {
-                "name": "alarm_off",
-                "regex": re.compile(prefix + turnoff_verbs + r"\s+" + articulo_opcional + r"(?:alarma|sistema\s+(?:de\s+)?(?:seguridad|alarma)|seguridad|vigilancia)",
-                                    re.IGNORECASE),
-                "action": lambda m: self.update_security("alarma", "estado", "apagado")
-            }
+            # # Security - Main Door Open
+            # {
+            #     "name": "door_main_open",
+            #     "regex": re.compile(prefix + r"(?:abre|desbloquea|desatranca)\s+(?:la\s+)?puerta\s+(?:principal|de\s+entrada|del\s+frente)",
+            #                         re.IGNORECASE),
+            #     "action": lambda m: self.update_security("puerta_principal", "estado", "abierto")
+            # },
+            # # Security - Main Door Close
+            # {
+            #     "name": "door_main_close",
+            #     "regex": re.compile(prefix + r"(?:cierra|bloquea|atranca|pon\s+seguro\s+a)\s+(?:la\s+)?puerta\s+(?:principal|de\s+entrada|del\s+frente)",
+            #                         re.IGNORECASE),
+            #     "action": lambda m: self.update_security("puerta_principal", "estado", "cerrado")
+            # },
+            # # Security - Garage Door Open
+            # {
+            #     "name": "door_garage_open",
+            #     "regex": re.compile(prefix + open_verbs + r"\s+" + articulo_opcional + r"(?:puerta\s+(?:del\s+|de\s+la\s+)?(?:garaje|cochera|estacionamiento|garage)|(?:garaje|cochera|estacionamiento|garage))",
+            #                         re.IGNORECASE),
+            #     "action": lambda m: self.update_security("puerta_garaje", "estado", "abierto")
+            # },
+            # # Security - Garage Door Close
+            # {
+            #     "name": "door_garage_close",
+            #     "regex": re.compile(prefix + close_verbs + r"\s+" + articulo_opcional + r"(?:puerta\s+(?:del\s+|de\s+la\s+)?(?:garaje|cochera|estacionamiento|garage)|(?:garaje|cochera|estacionamiento|garage))",
+            #                         re.IGNORECASE),
+            #     "action": lambda m: self.update_security("puerta_garaje", "estado", "cerrado")
+            # },
+            # # Security - Alarm On
+            # {
+            #     "name": "alarm_on",
+            #     "regex": re.compile(prefix + turnon_verbs + r"\s+" + articulo_opcional + r"(?:alarma|sistema\s+(?:de\s+)?(?:seguridad|alarma)|seguridad|vigilancia)",
+            #                         re.IGNORECASE),
+            #     "action": lambda m: self.update_security("alarma", "estado", "encendido")
+            # },
+            # # Security - Alarm Off
+            # {
+            #     "name": "alarm_off",
+            #     "regex": re.compile(prefix + turnoff_verbs + r"\s+" + articulo_opcional + r"(?:alarma|sistema\s+(?:de\s+)?(?:seguridad|alarma)|seguridad|vigilancia)",
+            #                         re.IGNORECASE),
+            #     "action": lambda m: self.update_security("alarma", "estado", "apagado")
+            # }
         ]
         return patterns
 

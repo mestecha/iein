@@ -90,7 +90,7 @@ class Assistant:
             "\n\n"
             f"Casa: {self.home.state['nombre']}\n"
             f"Habitaciones: {', '.join(self.home.state['habitaciones'].keys())}\n"
-            f"Seguridad: {', '.join(self.home.state['seguridad'].keys())}\n"
+            # f"Seguridad: {', '.join(self.home.state['seguridad'].keys())}\n"
         )
         
     def init_models(self):
