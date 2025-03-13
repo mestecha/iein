@@ -1,0 +1,8 @@
+gradio==5.20.0
+soundfile==0.13.1
+huggingface_hub==0.29.2
+scipy==1.15.2
+coqui-tts==0.25.3
+torch==2.6.0
+torchaudio==2.6.0
+transformers==4.46.2
