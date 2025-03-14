@@ -36,8 +36,8 @@ from TTS.tts.models.xtts import Xtts
 # from huggingface_hub import notebook_login
 # notebook_login()
 
-global_device = "1"
-os.environ["CUDA_VISIBLE_DEVICES"] = global_device
+# global_device = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = global_device
 # device = torch.device(f'cuda:{global_device}')
 
 # -----------------------------------------------------------------------------
@@ -53,7 +53,7 @@ class BaseLLM(ABC):
         self._tokenizer = None
         self._processor = None
         self._is_loaded = False
-        self.device = f"cuda:{global_device}" if torch.cuda.is_available() else "cpu"
+        self.device = f"cuda" if torch.cuda.is_available() else "cpu"
         self.logger = logging.getLogger(__name__)
 
     @property

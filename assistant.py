@@ -13,8 +13,8 @@ from home import Home
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-global_device = "1"
-os.environ["CUDA_VISIBLE_DEVICES"] = global_device
+# global_device = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = global_device
 
 css = """
 #container button.audio-mode-btn, 
