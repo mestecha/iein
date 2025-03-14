@@ -6,15 +6,12 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import gradio as gr
-from models import ChatLLM, WhisperASR, XTTSv2
+from models import ChatLLM, WhisperASR, VITTS
 from home import Home
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# global_device = "1"
-# os.environ["CUDA_VISIBLE_DEVICES"] = global_device
 
 css = """
 #container button.audio-mode-btn, 
@@ -100,12 +97,12 @@ class Assistant:
             self.whisper_asr.load()
             
         # init Chat LLM
-        self.chat_llm = ChatLLM(model_name="granite")
+        self.chat_llm = ChatLLM(model_name="phi4-mini")
         if not self.chat_llm.is_loaded:
             self.chat_llm.load()
             
-        # init TTS model
-        self.tts_model = XTTSv2()
+        # init TTS model - updated to use a Spanish model by default
+        self.tts_model = VITTS(language="spa")  # Spanish ISO code 'spa' for better compatibility
         if not self.tts_model.is_loaded:
             self.tts_model.load()
     
@@ -178,26 +175,52 @@ class Assistant:
                             self.send_audio_btn = gr.Button("Enviar", elem_classes="send-audio-btn", scale=1, min_width=10)
                             self.exit_audio_btn = gr.Button("Exit", elem_classes="exit-audio-btn", scale=1, min_width=10)
                     
-                    # Audio components for TTS
+                    # audio components for TTS
                     with gr.Row():
-                        self.ref_audio_file = gr.Audio(
-                            label="Reference Voice (Upload a short sample of your voice)", 
-                            sources=["upload"], 
-                            type="filepath"
+                        self.tts_audio_output = gr.Audio(
+                            label="Respuesta de voz del asistente",
+                            type="numpy"  # ensure this is set to numpy to accept (sample_rate, waveform) tuples
                         )
-                        self.tts_audio_output = gr.Audio(label="Assistant's Voice Response")
+                        with gr.Column():
+                            self.tts_language = gr.Dropdown(
+                                choices=[("Spanish", "spa"), ("English", "eng")],
+                                label="Idioma de la respuesta de voz",
+                                value="spa"
+                            )
+                            self.tts_speaking_rate = gr.Slider(
+                                minimum=0.1,
+                                maximum=10.0,
+                                step=0.1,
+                                label="Velocidad de habla",
+                                value=1.0
+                            )
+                        with gr.Column():
+                            self.tts_noise_scale = gr.Slider(
+                                minimum=0.1,
+                                maximum=2.5,
+                                step=0.05,
+                                label="Escala de ruido",
+                                value=0.667
+                            )
+                            self.tts_noise_scale_duration = gr.Slider(
+                                minimum=0.1,
+                                maximum=2.0,
+                                step=0.05,
+                                label="Duración de la escala de ruido",
+                                value=0.8
+                            )                        
                 
                 
                 with gr.Column():
                     self.system_prompt_input = gr.Textbox(
-                        label="System Prompt", 
+                        label="Prompt del sistema", 
                         value=self.system_prompt,
                         lines=10
                     )
                     
                     # new row for update prompt button and clear history checkbox
                     with gr.Column():
-                        self.update_prompt_btn = gr.Button("Update System Prompt")
+                        self.update_prompt_btn = gr.Button("Actualizar prompt del sistema")
                         with gr.Row():
                             self.clear_history_checkbox = gr.Checkbox(
                                 label="Limpiar historial del chat", 
@@ -213,8 +236,8 @@ class Assistant:
                             "</div>"
                         )             
                     
-                    self.status_output = gr.JSON(label="Current Home Status")
-                    self.log_output = gr.Text(label="Log", visible=False)
+                    self.status_output = gr.JSON(label="Estado actual del hogar")
+                    self.log_output = gr.Text(label="Log", visible=True)
             
                 
             
@@ -243,21 +266,21 @@ class Assistant:
             # 3. sending recorded audio:
             self.send_audio_btn.click(
                 fn=self.process_voice_message,
-                inputs=[self.audio_recorder, self.ref_audio_file, self.chat_state],
+                inputs=[self.audio_recorder, self.chat_state],
                 outputs=[self.chat_history, self.tts_audio_output, self.status_output, self.log_output, self.chat_state, self.chat_text_input]
             )
             
             # 4. sending text messages:
             self.send_text_btn.click(
                 fn=self.process_text_message,
-                inputs=[self.chat_text_input, self.ref_audio_file, self.chat_state],
+                inputs=[self.chat_text_input, self.chat_state],
                 outputs=[self.chat_history, self.tts_audio_output, self.status_output, self.log_output, self.chat_state, self.chat_text_input]
             )
             
             # 5. submitting text messages:
             self.chat_text_input.submit(
                 fn=self.process_text_message,
-                inputs=[self.chat_text_input, self.ref_audio_file, self.chat_state],
+                inputs=[self.chat_text_input, self.chat_state],
                 outputs=[self.chat_history, self.tts_audio_output, self.status_output, self.log_output, self.chat_state, self.chat_text_input]
             )
             
@@ -394,7 +417,7 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             return final_prompt
 
     def process_text_message(
-        self, text: str, ref_audio_file: Optional[str], history: List
+        self, text: str, history: List
     ):
         if not text or text.strip() == "":
             yield history, None, self.home.state, "Please enter a command.", history, gr.update(value="")
@@ -434,8 +457,20 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
                 yield history, None, self.home.state, "Procesando respuesta...", history, gr.update(value="")
             
             # generate TTS only after completing the response
-            if ref_audio_file and last_response:
-                tts_output = self._generate_tts(last_response, ref_audio_file)
+            if last_response:
+                # Get TTS parameters from UI
+                language = self.tts_language.value
+                speaking_rate = self.tts_speaking_rate.value
+                noise_scale = self.tts_noise_scale.value
+                noise_scale_duration = self.tts_noise_scale_duration.value
+                
+                tts_output = self._generate_tts(
+                    last_response,
+                    language=language,
+                    speaking_rate=speaking_rate,
+                    noise_scale=noise_scale,
+                    noise_scale_duration=noise_scale_duration
+                )
                 yield history, tts_output, self.home.state, "Respuesta generada con audio.", history, gr.update(value="")
             else:
                 yield history, None, self.home.state, "Respuesta generada.", history, gr.update(value="")
@@ -453,7 +488,7 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             yield history, None, self.home.state, error_msg, history, gr.update(value="")
     
     def process_voice_message(
-        self, audio, ref_audio_file: Optional[str], history: List
+        self, audio, history: List
     ):
         """Process a voice command with the same functionality as text messages."""
         if audio is None:
@@ -501,8 +536,20 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
                 yield history, None, self.home.state, "Procesando respuesta...", history, gr.update(value="")
             
             # generate TTS only after completing the response
-            if ref_audio_file and last_response:
-                tts_output = self._generate_tts(last_response, ref_audio_file)
+            if last_response:
+                # Get TTS parameters from UI
+                language = self.tts_language.value
+                speaking_rate = self.tts_speaking_rate.value
+                noise_scale = self.tts_noise_scale.value
+                noise_scale_duration = self.tts_noise_scale_duration.value
+                
+                tts_output = self._generate_tts(
+                    last_response,
+                    language=language,
+                    speaking_rate=speaking_rate,
+                    noise_scale=noise_scale,
+                    noise_scale_duration=noise_scale_duration
+                )
                 yield history, tts_output, self.home.state, "Respuesta generada con audio.", history, gr.update(value="")
             else:
                 yield history, None, self.home.state, "Respuesta generada.", history, gr.update(value="")
@@ -524,31 +571,34 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             
             yield history, None, self.home.state, error_msg, history, gr.update(value="")
 
-    def _generate_tts(self, text: str, ref_audio_file: str) -> Optional[str]:
-        """Generate TTS output from text using the reference audio."""
-        if not text or not ref_audio_file:
+    def _generate_tts(
+        self, 
+        text: str, 
+        language: str = "spa",
+        speaking_rate: float = 1.0,
+        noise_scale: float = 0.667,
+        noise_scale_duration: float = 0.8
+    ) -> Optional[tuple]:
+        """
+        Generate TTS output from text without needing reference audio.
+        Returns a tuple of (sample_rate, waveform) directly usable by gr.Audio.
+        """
+        if not text:
             return None
         
         try:
-            # get speaker conditioning from reference audio
-            gpt_cond_latent, speaker_embedding = self.tts_model.get_conditioning_latents(ref_audio_file)
-            
-            # create temporary directory for output if needed
-            temp_dir = Path("./temp")
-            temp_dir.mkdir(exist_ok=True)
-            temp_filename = f"assistant_response_{int(time.time())}.wav"
-            save_path = str(temp_dir / temp_filename)
-            
-            # generate speech
-            result = self.tts_model.inference(
+            # generate speech directly with parameters
+            result = self.tts_model.generate(
                 text=text,
-                language="es",  # default to Spanish for this application
-                gpt_cond_latent=gpt_cond_latent,
-                speaker_embedding=speaker_embedding,
-                save_path=save_path
+                language=language,
+                speaking_rate=speaking_rate,
+                noise_scale=noise_scale,
+                noise_scale_duration=noise_scale_duration,
+                save_path=None  # don't save to file
             )
             
-            return result["file"]
+            # return the audio_out tuple directly (sample_rate, waveform)
+            return result["audio_out"]
         except Exception as e:
             logger.error(f"TTS generation error: {str(e)}")
             return None

@@ -4,16 +4,12 @@ import logging
 import os
 import threading
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 # Third-party imports
-import gradio as gr
 import numpy as np
-import soundfile as sf
 import torch
-import torchaudio
-from huggingface_hub import hf_hub_download
-from scipy import signal
+import scipy
 # version of transformers should be <= 4.48.0 for at least Phi3
 # source: https://github.com/huggingface/transformers/issues/36071
 from transformers import (
@@ -23,9 +19,10 @@ from transformers import (
     AutoTokenizer,
     TextIteratorStreamer,
     TextStreamer,
+    VitsTokenizer, 
+    VitsModel, 
+    set_seed
 )
-from TTS.tts.configs.xtts_config import XttsConfig
-from TTS.tts.models.xtts import Xtts
 
 # pip install --upgrade huggingface_hub
 # huggingface-cli login
@@ -36,12 +33,10 @@ from TTS.tts.models.xtts import Xtts
 # from huggingface_hub import notebook_login
 # notebook_login()
 
-# global_device = "1"
-# os.environ["CUDA_VISIBLE_DEVICES"] = global_device
-# device = torch.device(f'cuda:{global_device}')
+
 
 # -----------------------------------------------------------------------------
-# BaseLLM definition
+# BaseLLM interface class
 # -----------------------------------------------------------------------------
 class BaseLLM(ABC):
     """
@@ -96,7 +91,7 @@ class BaseLLM(ABC):
 
 
 # -----------------------------------------------------------------------------
-# WhisperASR definition
+# WhisperASR model class implementation
 # -----------------------------------------------------------------------------
 class WhisperASR(BaseLLM):
     """
@@ -151,7 +146,7 @@ class WhisperASR(BaseLLM):
             data = data.astype(np.float32)
         if sample_rate is not None and sample_rate != self.target_sample_rate:
             new_length = int(round(len(data) * self.target_sample_rate / sample_rate))
-            data = signal.resample(data, new_length)
+            data = scipy.signal.resample(data, new_length)
         return data
 
     def transcribe(
@@ -186,25 +181,22 @@ class WhisperASR(BaseLLM):
 
    
 # -----------------------------------------------------------------------------
-# ChatLLM definition
+# ChatLLM model class implementation
 # -----------------------------------------------------------------------------
 class ChatLLM(BaseLLM):
     """
     Chat-based Language Model implementation using HuggingFace Transformers.
     """
     AVAILABLE_MODELS: Dict[str, str] = {
-        "smol": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
-        "exaone": "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
-        "granite": "ibm-granite/granite-3.1-2b-instruct",
-        "phi": "microsoft/Phi-3-mini-4k-instruct",
-        "mistral": "mistralai/Mistral-7B-Instruct-v0.3",
-        "gemma": "google/gemma-2-9b-it",
-        "llama": "meta-llama/Meta-Llama-3-8B-Instruct"
+        "phi4-mini": "microsoft/Phi-4-mini-instruct",
+        "qwen2.5-3b": "Qwen/Qwen2.5-3B-Instruct",
+        "llama3.2-3b": "meta-llama/Llama-3.2-3B-Instruct",
+        "deepseek-r1-1.5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     }
 
     def __init__(
         self,
-        model_name: str = "smol",
+        model_name: str = "phi4-mini",
         cache_dir: Optional[str] = None,
         max_length: int = 2048,
         temperature: float = 0.7,
@@ -400,195 +392,102 @@ class ChatLLM(BaseLLM):
         
 
 # -----------------------------------------------------------------------------
-# Default settings for XTTS-v2
+# VITTS from MMS-TTS model universe class implementation
 # -----------------------------------------------------------------------------
-default_xtts_settings = {
-    "samplerate": 24000,
-    "temperature": 0.75,
-    "length_penalty": 1.0,
-    "num_beams": 1,
-    "repetition_penalty": 5.0,
-    "top_k": 50,
-    "top_p": 0.85,
-    "speed": 1.0,
-    "enable_text_splitting": False,
-    "use_deepspeed": False,
-}
-
-# -----------------------------------------------------------------------------
-# XTTSv2 Class Implementation
-# -----------------------------------------------------------------------------
-class XTTSv2(BaseLLM):
+class VITTS(BaseLLM):
     """
-    XTTSv2 model management class for Coqui XTTS-v2.
-
-    Features:
-      - Downloads and lazy-loads the model.
-      - Performs inference with configurable generation parameters.
-      - Supports both full and streaming inference.
-      - Handles generated audio output: can return a tensor for in-app playback or save to a file.
-    
-    Designed for seamless integration into a Gradio UI.
-    """
-    def __init__(self, hf_repo: str = 'coqui/XTTS-v2', cache_dir: str = "./cache"):
+    VITTS model management class for Meta MMS-TTS.
+    """   
+    def __init__(self, language: str = 'spa', cache_dir: str = "./cache"):
         super().__init__()
-        self.hf_repo = hf_repo
-        self.cache_dir = cache_dir
-        self.downloaded = False
-        self.lock = threading.Lock()
-
-    def download_model(self) -> None:
-        """
-        Download the model files from Hugging Face Hub if not already available.
-        """
-        if not self.downloaded:
-            self.logger.info("Downloading XTTS-v2 model files from Hugging Face Hub...")
-            # snapshot_download(repo_id=self.hf_repo, local_dir=self.cache_dir)
-            self.config_path = hf_hub_download(repo_id=self.hf_repo, filename="config.json", local_dir=self.cache_dir)
-            self.model_path = hf_hub_download(repo_id=self.hf_repo, filename="model.pth", local_dir=self.cache_dir)
-            self.vocab_path = hf_hub_download(repo_id=self.hf_repo, filename="vocab.json", local_dir=self.cache_dir)
-            self.downloaded = True
-            self.logger.info("Model files downloaded successfully.")
-        else:
-            self.logger.info("Model files already downloaded.")
-
+        self.language: str = language
+        self.model_id: str = f"facebook/mms-tts-{self.language}"
+        self.cache_dir: Optional[str] = cache_dir
+        self.logger = logging.getLogger(__name__)
+        set_seed(555)  # make deterministic
+        
     def load(self) -> None:
-        """
-        Load the XTTS-v2 model checkpoint using the downloaded files.
-        """
-        self.logger.info("Loading XTTS-v2 model...")
-        if not self.downloaded:
-            self.download_model()
         try:
-            config = XttsConfig()
-            config.models_dir = os.path.join("models", "tts")
-            config.load_json(self.config_path)
-
-            tts = Xtts.init_from_config(config)
-
-            with self.lock:
-                tts.load_checkpoint(
-                    config,
-                    checkpoint_path=self.model_path,
-                    vocab_path=self.vocab_path,
-                    use_deepspeed=default_xtts_settings['use_deepspeed'],
-                    eval=True
-                )
-            if 'cuda' in self.device:
-                tts.cuda()
-
-            self._model = tts
+            self._model = VitsModel.from_pretrained(
+                self.model_id, 
+                cache_dir=self.cache_dir,
+                trust_remote_code=True
+            ).to(self.device)
+            
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self.model_id, 
+                cache_dir=self.cache_dir,
+                trust_remote_code=True
+            )
+            
             self._is_loaded = True
-            self.logger.info("XTTS-v2 model loaded successfully.")
+            self.logger.info("TTS model loaded successfully.")
         except Exception as e:
-            self.logger.error(f"Error loading XTTS-v2 model: {e}")
+            self.logger.error(f"Error loading TTS model: {e}")
             self._is_loaded = False
             raise e
 
-    def _build_gen_kwargs(self, overrides: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Merge default generation parameters with any provided overrides.
-
-        :param overrides: Generation parameter overrides (e.g., temperature, speed).
-        :return: A dictionary of updated generation parameters.
-        """
-        defaults = {
-            "temperature": default_xtts_settings["temperature"],
-            "length_penalty": default_xtts_settings["length_penalty"],
-            "num_beams": default_xtts_settings["num_beams"],
-            "repetition_penalty": default_xtts_settings["repetition_penalty"],
-            "top_k": default_xtts_settings["top_k"],
-            "top_p": default_xtts_settings["top_p"],
-            "speed": default_xtts_settings["speed"],
-            "enable_text_splitting": default_xtts_settings["enable_text_splitting"],
-        }
-        defaults.update(overrides)
-        return defaults
-
-    def inference(self, text: str, language: str, gpt_cond_latent, speaker_embedding, save_path: Optional[str] = None, **overrides) -> Dict[str, Any]:
+    def generate(
+        self, 
+        text: str,
+        language: str = "spa",
+        speaking_rate: float = 1.0,
+        noise_scale: float = 0.667,
+        noise_scale_duration: float = 0.8,
+        save_path: Optional[str] = None,
+        ) -> Dict[str, Any]:
         """
         Generate speech audio from input text.
 
         :param text: The text to synthesize.
-        :param language: The language code (e.g. "en", "es").
-        :param gpt_cond_latent: Conditioning latent computed from reference audio.
-        :param speaker_embedding: Speaker embedding for voice cloning.
+        :param language: ISO language code (e.g., 'spa' for Spanish, 'eng' for English)
+        :param speaking_rate: Speech rate modifier
+        :param noise_scale: How random the speech prediction is
+        :param noise_scale_duration: How random the duration prediction is
         :param save_path: Optional file path to save the generated audio as a WAV file.
-        :param overrides: Generation parameter overrides (e.g., temperature, speed).
-        :return: A dictionary with the waveform tensor, samplerate, and, if saved, the file path.
+        :return: A dictionary with the waveform tensor, samplerate, and audio_out tuple for gr.Audio
         """
         self.logger.info("Starting inference...")
-        gen_kwargs = self._build_gen_kwargs(overrides)
-        result = self.model.inference(
-            text=text,
-            language=language,
-            gpt_cond_latent=gpt_cond_latent,
-            speaker_embedding=speaker_embedding,
-            **gen_kwargs
-        )
-        self.logger.info("Inference completed.")
-        waveform = torch.tensor(result["wav"])
-        samplerate = default_xtts_settings["samplerate"]
+        # if language changed, update source model id (+latency)
+        if language != self.language:
+            self.model_id = f"facebook/mms-tts-{language}"
+            self.language = language  # Update language tracking
+            # reinitialize the model with the new language
+            self.unload()
+            self._is_loaded = False
+            
+        if not self._is_loaded:
+            self.load()
+            
+        self.model.speaking_rate = speaking_rate
+        self.model.noise_scale = noise_scale
+        self.model.noise_scale_duration = noise_scale_duration
+        
+        inputs = self.tokenizer(
+            text, 
+            return_tensors="pt"
+        ).to(self.model.device)
+        
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        waveform = outputs.waveform[0].cpu().numpy().squeeze()
+        sample_rate = self.model.config.sampling_rate
+        
+        self.logger.info("Audio generation completed.")
+
+        result = {
+            "waveform": waveform, 
+            "samplerate": sample_rate,
+            "audio_out": (sample_rate, waveform)  # format compatible with gr.Audio
+        }
 
         if save_path:
             try:
-                torchaudio.save(save_path, waveform.unsqueeze(0), samplerate)
+                scipy.io.wavfile.write(save_path, rate=sample_rate, data=waveform)
                 self.logger.info(f"Audio saved to {save_path}")
-                return {"file": save_path, "waveform": waveform, "samplerate": samplerate}
+                result["file"] = save_path
             except Exception as e:
                 self.logger.error(f"Error saving audio: {e}")
-                raise e
-        else:
-            return {"waveform": waveform, "samplerate": samplerate}
-
-    def inference_stream(self, text: str, language: str, gpt_cond_latent, speaker_embedding, **overrides):
-        """
-        Generate speech audio in a streaming fashion.
-
-        :param text: The text to synthesize.
-        :param language: The language code for synthesis.
-        :param gpt_cond_latent: Conditioning latent from reference audio.
-        :param speaker_embedding: Speaker embedding for voice cloning.
-        :param overrides: Generation parameter overrides.
-        :return: A generator yielding chunks of audio tensors.
-        """
-        self.logger.info("Starting streaming inference...")
-        gen_kwargs = self._build_gen_kwargs(overrides)
-        return self.model.inference_stream(
-            text=text,
-            language=language,
-            gpt_cond_latent=gpt_cond_latent,
-            speaker_embedding=speaker_embedding,
-            **gen_kwargs
-        )
-
-    def save_audio(self, waveform: torch.Tensor, samplerate: int, file_path: str) -> str:
-        """
-        Save the provided audio waveform to a WAV file.
-
-        :param waveform: The audio waveform tensor.
-        :param samplerate: The sample rate for the audio.
-        :param file_path: The destination file path.
-        :return: The file path of the saved audio.
-        """
-        try:
-            torchaudio.save(file_path, waveform.unsqueeze(0), samplerate)
-            self.logger.info(f"Audio successfully saved to {file_path}")
-            return file_path
-        except Exception as e:
-            self.logger.error(f"Error saving audio file: {e}")
-            raise e
-
-    def get_conditioning_latents(self, audio_path: str):
-        """
-        Compute speaker conditioning latents from a reference audio file.
-
-        :param audio_path: Path to the reference audio file.
-        :return: A tuple (gpt_cond_latent, speaker_embedding).
-        """
-        self.logger.info("Computing speaker conditioning latents...")
-        return self.model.get_conditioning_latents(audio_path=[audio_path])
-
-
-    
-    
+                # continue without saving rather than raising
+        
+        return result
