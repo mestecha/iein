@@ -176,39 +176,41 @@ class Assistant:
                             self.exit_audio_btn = gr.Button("Exit", elem_classes="exit-audio-btn", scale=1, min_width=10)
                     
                     # audio components for TTS
-                    with gr.Row():
-                        self.tts_audio_output = gr.Audio(
-                            label="Respuesta de voz del asistente",
-                            type="numpy"  # ensure this is set to numpy to accept (sample_rate, waveform) tuples
-                        )
-                        with gr.Column():
-                            self.tts_language = gr.Dropdown(
-                                choices=[("Spanish", "spa"), ("English", "eng")],
-                                label="Idioma de la respuesta de voz",
-                                value="spa"
-                            )
-                            self.tts_speaking_rate = gr.Slider(
-                                minimum=0.1,
-                                maximum=10.0,
-                                step=0.1,
-                                label="Velocidad de habla",
-                                value=1.0
-                            )
-                        with gr.Column():
-                            self.tts_noise_scale = gr.Slider(
-                                minimum=0.1,
-                                maximum=2.5,
-                                step=0.05,
-                                label="Escala de ruido",
-                                value=0.667
-                            )
-                            self.tts_noise_scale_duration = gr.Slider(
-                                minimum=0.1,
-                                maximum=2.0,
-                                step=0.05,
-                                label="Duración de la escala de ruido",
-                                value=0.8
-                            )                        
+                   
+                    self.tts_audio_output = gr.Audio(
+                        label="Respuesta de voz del asistente",
+                        type="numpy"  # ensure this is set to numpy to accept (sample_rate, waveform) tuples
+                    )
+                    with gr.Row():                        
+                        with gr.Accordion("Configuración de TTS", open=False):
+                            with gr.Column():
+                                self.tts_language = gr.Dropdown(
+                                    choices=[("Spanish", "spa"), ("English", "eng")],
+                                    label="Idioma de la respuesta de voz",
+                                    value="spa"
+                                )
+                                self.tts_speaking_rate = gr.Slider(
+                                    minimum=0.1,
+                                    maximum=10.0,
+                                    step=0.1,
+                                    label="Velocidad de habla",
+                                    value=1.0
+                                )
+                            with gr.Column():
+                                self.tts_noise_scale = gr.Slider(
+                                    minimum=0.1,
+                                    maximum=2.5,
+                                    step=0.05,
+                                    label="Escala de ruido",
+                                    value=0.667
+                                )
+                                self.tts_noise_scale_duration = gr.Slider(
+                                    minimum=0.1,
+                                    maximum=2.0,
+                                    step=0.05,
+                                    label="Duración de la escala de ruido",
+                                    value=0.8
+                                )                        
                 
                 
                 with gr.Column():
