@@ -1,6 +1,4 @@
-# Smart Home Assistant (Simulation) using LLMs
-
-## ⚠️ Educational Purpose
+# (Simulation) Smart Home Assistant using LLMs
 
 This repository contains a **simulated smart home environment** designed for educational purposes. It serves as a practical example of how Large Language Models (LLMs) can be applied to complex tasks like home automation control.
 
