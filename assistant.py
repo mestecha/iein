@@ -8,57 +8,17 @@ from typing import List, Optional, Tuple
 import gradio as gr
 from models import ChatLLM, WhisperASR, VITTS
 from home import Home
+import torch
 
-# Configure logging
+# configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-css = """
-#container button.audio-mode-btn, 
-#container button.send-text-btn, 
-#container button.send-audio-btn, 
-#container button.exit-audio-btn {
-    padding: 1px 3px !important;
-    min-width: 40px !important;
-    width: 50px !important;
-    font-size: 12px !important;
-    height: 35px !important;
-    line-height: 16px !important;
-    flex-grow: 0 !important;
-    flex-shrink: 0 !important;
-}
-
-#container #text-mode-container .gr-row {
-    display: flex;
-    justify-content: space-between; /* Ensures full-width spacing */
-    align-items: center;
-    width: 100%; /* Ensures it takes the full width */
-}
-
-#container #audio-mode-container .gr-row {
-    display: flex;
-    justify-content: space-between; /* Ensures full-width spacing */
-    align-items: center;
-    width: 100%; /* Ensures it takes the full width */
-}
-
-#container #text-mode-container .gr-textbox {
-    flex-grow: 1;
-    width: 100%;
-}
-
-#container #audio-mode-container .gr-audio {
-    flex-grow: 1;
-    width: 100%;
-}
-"""
 
 
 class Assistant:
     """
-    Smart Home Assistant that integrates speech recognition, text generation,
-    and text-to-speech to simulate an interactive experience for controlling a
-    smart home using natural language.
+    smart home assistant that integrates speech recognition, text generation,
+    and text-to-speech to control a smart home using natural language
     """
     
     def __init__(self, 
@@ -77,7 +37,7 @@ class Assistant:
         self.init_models()
         
         # create gradio ui
-        self.demo = gr.Blocks(title="Smart Home Assistant", css=css)
+        self.demo = gr.Blocks(title="Smart Home Assistant")
         self.ui()
         
     def _default_system_prompt(self) -> str:
@@ -87,34 +47,35 @@ class Assistant:
             "\n\n"
             f"Casa: {self.home.state['nombre']}\n"
             f"Habitaciones: {', '.join(self.home.state['habitaciones'].keys())}\n"
-            # f"Seguridad: {', '.join(self.home.state['seguridad'].keys())}\n"
         )
         
     def init_models(self):
+        """initialize AI models"""
         # init ASR model
         self.whisper_asr = WhisperASR(model_size="tiny")
         if not self.whisper_asr.is_loaded:
             self.whisper_asr.load()
             
         # init Chat LLM
-        self.chat_llm = ChatLLM(model_name="phi4-mini")
+        self.chat_llm = ChatLLM(model_name="llama3.2-3b")
         if not self.chat_llm.is_loaded:
             self.chat_llm.load()
             
-        # init TTS model - updated to use a Spanish model by default
-        self.tts_model = VITTS(language="spa")  # Spanish ISO code 'spa' for better compatibility
+        # init TTS model with Spanish as default
+        self.tts_model = VITTS(language="spa")
         if not self.tts_model.is_loaded:
             self.tts_model.load()
     
     def ui(self):
-        """builds the gradio interface."""
+        """build the gradio interface"""
         with self.demo:
             gr.Markdown(f"# {self.home.state['nombre']}")
             gr.Markdown("Interactúa usando la voz o texto.")
             
             with gr.Blocks():
                 with gr.Column(variant='compact', elem_id="container"):
-                    self.build_assistant()
+                    # build the assistant block
+                    self.build_assistant_block()
                     
                     # init the status output with the current home state
                     self.demo.load(
@@ -123,43 +84,61 @@ class Assistant:
                         outputs=self.status_output
                     )
     
-    def build_assistant(self):
-        """build the main assistant interaction."""
+    def build_assistant_block(self):
+        """build the main assistant interaction block"""
         with gr.Column():            
-            # chat display and state for conversation history.
+            # chat display and state for conversation history
             with gr.Row():
-                with gr.Column():
-                    self.chat_history = gr.Chatbot(elem_id="chatbox", elem_classes="chat-container", label="", type="messages")
+                # chat history and input
+                with gr.Column(elem_id="chat-container"):
+                    self.chat_history = gr.Chatbot(
+                        elem_id="chatbox", 
+                        elem_classes="chat-container", 
+                        label="", 
+                        type="messages"
+                    )
                     self.chat_state = gr.State([])
                                     
                     # container for text mode (default)
-                    with gr.Column(elem_id="text-mode-container", scale=3) as text_mode:
+                    with gr.Column(elem_classes="text-mode-container") as text_mode:
                         with gr.Row():
                             self.chat_text_input = gr.Textbox(
                                 container=False,
                                 label="", 
-                                placeholder="Text message...", 
+                                placeholder="Escribe un mensaje...", 
                                 elem_id="text-input",
-                                scale=9
+                                elem_classes="text-input-chat"
                             )
                         
-                            # with gr.Column(scale=1, min_width=10):
-                            self.send_text_btn = gr.Button("Enviar", elem_classes="send-text-btn", scale=1, min_width=10)
-                            self.audio_mode_btn = gr.Button("Audio", elem_classes="audio-mode-btn", scale=1, min_width=10)
+                            self.send_text_btn = gr.Button("Enviar", elem_classes="send-text-btn")
+                            self.audio_mode_btn = gr.Button("Audio", elem_classes="audio-mode-btn")
                         
-                        self.clear_chat_btn = gr.Button("Limpiar chat", variant="secondary", size="sm", scale=9)
+                        # clear chat button
+                        with gr.Row():
+                            self.clear_chat_btn = gr.Button("Limpiar chat", variant="secondary", size="sm")
                         
+                        # checkbox for LLM processing
                         with gr.Row():
                             self.use_llm_checkbox = gr.Checkbox(
                                 label="Procesar comandos con LLM", 
                                 value=True,
-                                scale=10,
                                 info="Activado: usa LLM para procesar comandos. Desactivado: usa expresiones regulares.",
                                 container=False
                             )
 
-                    # container for audio mode (initially hidden)        
-                    with gr.Column(elem_id="audio-mode-container", visible=False, scale=3) as audio_mode:
+                        # LLM model dropdown
+                        with gr.Row():
+                            self.llm_model_dropdown = gr.Dropdown(
+                                choices=list(ChatLLM.models.keys()),
+                                interactive=True,
+                                container=False,
+                                value="llama3.2-3b",
+                                label="Modelo LLM",
+                                info="Selecciona el modelo de lenguaje a utilizar",
+                            )
+
+                    # container for audio mode (hidden initially)        
+                    with gr.Column(elem_id="audio-mode-container", visible=False) as audio_mode:
                         with gr.Row():
                             self.audio_recorder = gr.Audio(
                                 container=False,
@@ -168,24 +147,26 @@ class Assistant:
                                 visible=True, 
                                 elem_id="audio-recorder", 
                                 label=None,
-                                scale=9
                             )
-                            # row for the two buttons in audio mode: send and exit.
-                            # with gr.Column():
-                            self.send_audio_btn = gr.Button("Enviar", elem_classes="send-audio-btn", scale=1, min_width=10)
-                            self.exit_audio_btn = gr.Button("Exit", elem_classes="exit-audio-btn", scale=1, min_width=10)
+
+                            # row for the two buttons in audio mode: send and exit
+                            self.send_audio_btn = gr.Button("Enviar", elem_classes="send-audio-btn")
+                            self.exit_audio_btn = gr.Button("Salir", elem_classes="exit-audio-btn")
                     
                     # audio components for TTS
-                   
                     self.tts_audio_output = gr.Audio(
                         label="Respuesta de voz del asistente",
-                        type="numpy"  # ensure this is set to numpy to accept (sample_rate, waveform) tuples
+                        type="numpy"
                     )
+
+                    # TTS configuration
                     with gr.Row():                        
                         with gr.Accordion("Configuración de TTS", open=False):
                             with gr.Column():
                                 self.tts_language = gr.Dropdown(
-                                    choices=[("Spanish", "spa"), ("English", "eng")],
+                                    choices=[("Español", "spa"), ("English", "eng")],
+                                    interactive=True,
+                                    container=False,
                                     label="Idioma de la respuesta de voz",
                                     value="spa"
                                 )
@@ -212,7 +193,7 @@ class Assistant:
                                     value=0.8
                                 )                        
                 
-                
+                # system prompt input and status output
                 with gr.Column():
                     self.system_prompt_input = gr.Textbox(
                         label="Prompt del sistema", 
@@ -220,9 +201,9 @@ class Assistant:
                         lines=10
                     )
                     
-                    # new row for update prompt button and clear history checkbox
+                    # update prompt button and clear history checkbox
                     with gr.Column():
-                        self.update_prompt_btn = gr.Button("Actualizar prompt del sistema")
+                        self.update_prompt_btn = gr.Button("Actualizar prompt del sistema", size="sm")
                         with gr.Row():
                             self.clear_history_checkbox = gr.Checkbox(
                                 label="Limpiar historial del chat", 
@@ -239,19 +220,23 @@ class Assistant:
                         )             
                     
                     self.status_output = gr.JSON(label="Estado actual del hogar")
-                    self.log_output = gr.Text(label="Log", visible=True)
-            
-                
+                    self.log_output = gr.Text(
+                        label="Log", 
+                        visible=True, 
+                        lines=2,
+                        container=False, 
+                        elem_classes="log-output"
+                    )
             
             # --- bindings ---
-            # 1. clicking the Audio button hides text mode and shows audio mode.
+            # 1. clicking the Audio button hides text mode and shows audio mode
             self.audio_mode_btn.click(
                 fn=lambda: (gr.update(visible=False), gr.update(visible=True)),
                 inputs=[],
                 outputs=[text_mode, audio_mode]
             )
             
-            # 2. clicking the Exit button in audio mode hides the audio container and returns to text mode.
+            # 2. clicking the Exit button in audio mode returns to text mode
             self.exit_audio_btn.click(
                 fn=lambda: (gr.update(visible=True), gr.update(visible=False)),
                 inputs=[],
@@ -265,46 +250,50 @@ class Assistant:
                 outputs=[self.log_output]
             )
             
-            # 3. sending recorded audio:
+            # 3. sending recorded audio
             self.send_audio_btn.click(
                 fn=self.process_voice_message,
                 inputs=[self.audio_recorder, self.chat_state],
                 outputs=[self.chat_history, self.tts_audio_output, self.status_output, self.log_output, self.chat_state, self.chat_text_input]
             )
             
-            # 4. sending text messages:
+            # 4. sending text messages
             self.send_text_btn.click(
                 fn=self.process_text_message,
                 inputs=[self.chat_text_input, self.chat_state],
                 outputs=[self.chat_history, self.tts_audio_output, self.status_output, self.log_output, self.chat_state, self.chat_text_input]
             )
             
-            # 5. submitting text messages:
+            # 5. submitting text messages
             self.chat_text_input.submit(
                 fn=self.process_text_message,
                 inputs=[self.chat_text_input, self.chat_state],
                 outputs=[self.chat_history, self.tts_audio_output, self.status_output, self.log_output, self.chat_state, self.chat_text_input]
             )
             
-            # 6. updating the system prompt:
+            # 6. updating the system prompt
             self.update_prompt_btn.click(
                 fn=self.update_system_prompt,
                 inputs=[self.system_prompt_input, self.clear_history_checkbox, self.chat_state],
                 outputs=[self.chat_history, self.log_output, self.chat_state]
             )
             
-            # 7. clearing chat history:
+            # 7. clearing chat history
             self.clear_chat_btn.click(
                 fn=self.clear_chat_history,
                 inputs=[],
                 outputs=[self.chat_history, self.chat_state, self.log_output]
             )
 
+            # Add model switching binding
+            self.llm_model_dropdown.change(
+                fn=self._switch_llm_model,
+                inputs=[self.llm_model_dropdown],
+                outputs=[self.log_output]
+            )
+
     def _regex_request_handler(self, user_query: str):
-        """
-        Handles user requests using regex pattern matching to detect commands.
-        Builds a system prompt with contextual information based on detected intents.
-        """
+        """handle user requests using regex pattern matching"""
         final_prompt = self.system_prompt
                 
         # process request to detect intents
@@ -317,8 +306,6 @@ class Assistant:
                         f"Se han aplicado {num_changes} cambios basados en la solicitud del usuario")
         
         # if intent is not a command or if no intent is detected, don't add additional context
-        # is_command is True when a command pattern is detected in the text
-        # success is True when at least one change was applied correctly
         if not intent_result.get("is_command", False):
             return final_prompt
         
@@ -344,24 +331,13 @@ class Assistant:
         return final_prompt
 
     def _llm_request_handler(self, user_query: str):
-        """
-        Handles user requests using LLM to detect and process commands.
-        This method asks the LLM to analyze if a query contains a command,
-        determine if it can be executed, apply changes to the home state,
-        and provide a summary of the actions taken.
-        
-        Returns:
-            str: Updated system prompt with context about the changes
-        """
-        # start with the base system prompt
+        """handle user requests using LLM to detect and process commands"""
         final_prompt = self.system_prompt
-        
-        # convert the current state to a JSON string for the LLM
         home_state_json = json.dumps(self.home.state, indent=3)
         
         # create a prompt that asks the LLM to analyze the query and update the state if needed
         system_prompt_request = f"""
-You are an AI assistant that controls a smart home. Analyze the user's message to determine if they're requesting any changes to the home.
+You are an helpful assistant that controls a smart home. Analyze the user's message to determine if they're requesting any changes to the home.
 Instructions of your task:
 1. Determine if the user is requesting a change to the home state (e.g., turning on/off devices, changing temperature, opening/closing doors).
 2. If yes, determine if the requested change is possible given the current state and home configuration.
@@ -409,20 +385,16 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
                     if summary:
                         final_prompt = f"{final_prompt}\n\nCambios detectados por LLM:\n{summary}"
             
-            # if there was an error processing the JSON or if no command was detected,
-            # just return the original prompt
             return final_prompt
                 
         except Exception as e:
-            # Log the error but don't break the flow - just return the original prompt
             logger.error(f"Error in LLM request handler: {str(e)}")
             return final_prompt
 
-    def process_text_message(
-        self, text: str, history: List
-    ):
+    def process_text_message(self, text: str, history: List):
+        """process a text message and generate response"""
         if not text or text.strip() == "":
-            yield history, None, self.home.state, "Please enter a command.", history, gr.update(value="")
+            yield history, None, self.home.state, "Por favor ingresa un comando.", history, gr.update(value="")
             return
         
         # initialize or update history
@@ -433,15 +405,8 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
         yield history, None, self.home.state, "", history, gr.update(value="")
         
         try:            
-            # choose which request handler to use
-            if self.use_llm_handler:
-                # llm-based request handler
-                system_prompt = self._llm_request_handler(text)
-            else:
-                # regex-based request handler
-                system_prompt = self._regex_request_handler(text)
+            system_prompt = self._llm_request_handler(text) if self.use_llm_handler else self._regex_request_handler(text)
             
-            # prepare for response
             tts_output = None
             last_response = ""
             
@@ -460,7 +425,6 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             
             # generate TTS only after completing the response
             if last_response:
-                # Get TTS parameters from UI
                 language = self.tts_language.value
                 speaking_rate = self.tts_speaking_rate.value
                 noise_scale = self.tts_noise_scale.value
@@ -481,7 +445,6 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             error_msg = f"Error al procesar la solicitud: {str(e)}"
             logger.error(error_msg)
             
-            # add error message to history
             if history and history[-1]["role"] == "assistant":
                 history[-1]["content"] = f"Lo siento, ocurrió un problema: {str(e)}"
             else:
@@ -489,12 +452,10 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             
             yield history, None, self.home.state, error_msg, history, gr.update(value="")
     
-    def process_voice_message(
-        self, audio, history: List
-    ):
-        """Process a voice command with the same functionality as text messages."""
+    def process_voice_message(self, audio, history: List):
+        """process a voice command and generate response"""
         if audio is None:
-            yield history, None, self.home.state, "No audio provided.", history, gr.update(value="")
+            yield history, None, self.home.state, "No se detectó audio.", history, gr.update(value="")
             return
         
         try:
@@ -502,33 +463,21 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             transcription = self.whisper_asr.transcribe(audio)
             
             if not transcription or transcription.strip() == "":
-                yield history, None, self.home.state, "Could not transcribe audio clearly.", history, gr.update(value="")
+                yield history, None, self.home.state, "No se ha podido transcribir el audio.", history, gr.update(value="")
                 return
             
-            # add transcription to history
             history = history or []
-            history.append({"role": "user", "content": f"[Voice] {transcription}"})
+            history.append({"role": "user", "content": f"[Voz] {transcription}"})
+            yield history, None, self.home.state, "Audio transcrito con éxito.", history, gr.update(value="")
             
-            # initial performance to show user message immediately
-            yield history, None, self.home.state, "Transcribed successfully.", history, gr.update(value="")
+            system_prompt = self._llm_request_handler(transcription) if self.use_llm_handler else self._regex_request_handler(transcription)
             
-            # choose request handler
-            if self.use_llm_handler:
-                # llm-based request handler
-                system_prompt = self._llm_request_handler(transcription)
-            else:
-                # regex-based request handler
-                system_prompt = self._regex_request_handler(transcription)
-            
-            # prepare for response
             tts_output = None
             last_response = ""
             
-            # generate response with streaming
             for partial_response in self.chat_llm.generate_streaming(transcription, system_prompt=system_prompt):
                 last_response = partial_response
                 
-                # update history with partial response
                 if history and history[-1]["role"] == "assistant":
                     history[-1]["content"] = partial_response
                 else:
@@ -537,9 +486,7 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
                 time.sleep(0.05)  # small delay for visual feedback
                 yield history, None, self.home.state, "Procesando respuesta...", history, gr.update(value="")
             
-            # generate TTS only after completing the response
             if last_response:
-                # Get TTS parameters from UI
                 language = self.tts_language.value
                 speaking_rate = self.tts_speaking_rate.value
                 noise_scale = self.tts_noise_scale.value
@@ -560,14 +507,12 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             error_msg = f"Error al procesar comando de voz: {str(e)}"
             logger.error(error_msg)
             
-            # add error message to history
             if history and history[-1]["role"] == "assistant":
                 history[-1]["content"] = f"Lo siento, ocurrió un problema: {str(e)}"
             else:
-                # if history is empty, create one with the error
                 if not history:
                     history = [
-                        {"role": "user", "content": f"[Voice] (Error en transcripción)"},
+                        {"role": "user", "content": f"[Voz] (Error en transcripción)"},
                     ]
                 history.append({"role": "assistant", "content": f"Lo siento, ocurrió un problema: {str(e)}"})
             
@@ -581,89 +526,100 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
         noise_scale: float = 0.667,
         noise_scale_duration: float = 0.8
     ) -> Optional[tuple]:
-        """
-        Generate TTS output from text without needing reference audio.
-        Returns a tuple of (sample_rate, waveform) directly usable by gr.Audio.
-        """
+        """generate speech from text with customizable parameters"""
         if not text:
             return None
         
         try:
-            # generate speech directly with parameters
             result = self.tts_model.generate(
                 text=text,
                 language=language,
                 speaking_rate=speaking_rate,
                 noise_scale=noise_scale,
                 noise_scale_duration=noise_scale_duration,
-                save_path=None  # don't save to file
+                save_path=None
             )
             
             # return the audio_out tuple directly (sample_rate, waveform)
             return result["audio_out"]
         except Exception as e:
-            logger.error(f"TTS generation error: {str(e)}")
+            logger.error(f"Error en generación de voz: {str(e)}")
             return None
      
     def update_system_prompt(self, new_prompt: str, clear_history: bool, current_history: List) -> Tuple[List, str, List]:
-        """
-        Update the system prompt for the assistant.
-        """
+        """update the system prompt and optionally clear chat history"""
         self.system_prompt = new_prompt
         
-        # create message to notify the user about the prompt update
-        update_message = {
-            "role": "system", 
-            "content": "Sistema actualizado: Se ha cambiado el prompt del sistema." + 
-                      (" Historial de chat borrado." if clear_history else "")
-        }
-        
         if clear_history:
-            # clear history but add a message notifying about the change
-            updated_history = [update_message]
+            updated_history = []
             updated_chat_state = []
             
-            # also clear the history in the chat_llm
             if hasattr(self.chat_llm, "conv_history"):
                 self.chat_llm.conv_history = []
                 
-            log_message = "System prompt updated and chat history cleared."
+            log_message = "Prompt del sistema actualizado y chat limpiado."
         else:
-            # keep history and add a notification message
-            updated_history = current_history + [update_message]
+            updated_history = current_history
             updated_chat_state = current_history
-            log_message = "System prompt updated, chat history preserved."
+            log_message = "Prompt del sistema actualizado, chat conservado."
             
         return updated_history, log_message, updated_chat_state
 
     def clear_chat_history(self) -> Tuple[List, List, str]:
-        """
-        Clear the chat history and display a system message.
-        """
-        # create message to notify the user about the cleared chat
-        clear_message = {
-            "role": "system",
-            "content": "🧹 Chat limpiado: Se ha borrado el historial de conversación."
-        }
-        
+        """clear the chat history"""
         if hasattr(self.chat_llm, "conv_history"):
             self.chat_llm.conv_history = []
         
-        # return empty history + notification, empty state, and log message
-        return [clear_message], [clear_message], "Chat history cleared successfully."
+        return [], [], "Chat borrado con éxito."
 
     def _update_processing_method(self, use_llm: bool) -> str:
-        """
-        Updates the processing method based on the checkbox value.
-        """
+        """update the command processing method"""
         self.use_llm_handler = use_llm
         if use_llm:
             return "Cambio a procesado de peticiones con LLM."
         else:
             return "Cambio a procesado de peticiones con Regex."
 
+    def _switch_llm_model(self, new_model_name: str) -> str:
+        """switch to a different LLM model"""
+        try:
+            if new_model_name not in ChatLLM.models:
+                return f"Error: Modelo '{new_model_name}' no disponible. Opciones válidas: {list(ChatLLM.models.keys())}"
+            
+            # if it's the same model, no need to switch
+            if hasattr(self, 'chat_llm') and self.chat_llm.model_name == new_model_name:
+                return f"El modelo {new_model_name} ya está en uso."
+            
+            # store conversation history to preserve it
+            old_history = []
+            if hasattr(self, 'chat_llm') and self.chat_llm.conv_history:
+                old_history = self.chat_llm.conv_history.copy()
+            
+            # properly unload the current model if it exists
+            if hasattr(self, 'chat_llm'):
+                self.chat_llm.unload()
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+            # initialize and load the new model
+            self.chat_llm = ChatLLM(model_name=new_model_name)
+            self.chat_llm.load()
+            
+            # restore conversation history if it existed
+            if old_history:
+                self.chat_llm.conv_history = old_history
+            
+            return f"Nuevo modelo actualizado: {new_model_name}"
+            
+        except Exception as e:
+            error_msg = f"Error al actualizar el modelo: {str(e)}"
+            self.logger.error(error_msg)
+            return error_msg
+
     def launch(self, share=True):
-        """Wrapper to launch Gradio interface."""
+        """launch the gradio interface"""
         self.demo.launch(share=share)
 
 # example usage

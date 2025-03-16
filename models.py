@@ -187,10 +187,10 @@ class ChatLLM(BaseLLM):
     """
     Chat-based Language Model implementation using HuggingFace Transformers.
     """
-    AVAILABLE_MODELS: Dict[str, str] = {
+    models: Dict[str, str] = {
         "phi4-mini": "microsoft/Phi-4-mini-instruct",
         "qwen2.5-3b": "Qwen/Qwen2.5-3B-Instruct",
-        "llama3.2-3b": "meta-llama/Llama-3.2-3B-Instruct",
+        "llama3.2-3b": "PASI1028/Llama-3.2-3B-Instruct",
         "deepseek-r1-1.5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     }
 
@@ -204,12 +204,12 @@ class ChatLLM(BaseLLM):
         conv_history_limit: int = 5,
     ) -> None:
         super().__init__()
-        if model_name not in self.AVAILABLE_MODELS:
+        if model_name not in self.models:
             raise ValueError(
-                f"Invalid model_name '{model_name}'. Must be one of: {list(self.AVAILABLE_MODELS.keys())}"
+                f"Invalid model_name '{model_name}'. Must be one of: {list(self.models.keys())}"
             )
         self.model_name: str = model_name
-        self.model_id: str = self.AVAILABLE_MODELS[model_name]
+        self.model_id: str = self.models[model_name]
         self.cache_dir: Optional[str] = cache_dir
         self.max_length: int = max_length
         self.temperature: float = temperature
@@ -410,8 +410,7 @@ class VITTS(BaseLLM):
         try:
             self._model = VitsModel.from_pretrained(
                 self.model_id, 
-                cache_dir=self.cache_dir,
-                trust_remote_code=True
+                cache_dir=self.cache_dir
             ).to(self.device)
             
             self._tokenizer = AutoTokenizer.from_pretrained(
