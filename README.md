@@ -55,9 +55,9 @@ iein/
 
 ### 1. Google Colab Setup
 
-For a quick test without local installation, use our Colab notebook (requires Google account):
+For a quick test without local installation, use our Colab notebook:
 
-![Open In Colab](https://colab.research.google.com/drive/1Rjtl0juRd6j0u9JKREsnqh_CeXRAGbzF?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1Rjtl0juRd6j0u9JKREsnqh_CeXRAGbzF?usp=sharing)
 
 ### 2. Local Setup
 
