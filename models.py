@@ -450,7 +450,7 @@ class VITTS(BaseLLM):
         # if language changed, update source model id (+latency)
         if language != self.language:
             self.model_id = f"facebook/mms-tts-{language}"
-            self.language = language  # Update language tracking
+            self.language = language  # update language tracking
             # reinitialize the model with the new language
             self.unload()
             self._is_loaded = False

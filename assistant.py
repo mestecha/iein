@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import gradio as gr
+import torch
+
 from models import ChatLLM, WhisperASR, VITTS
 from home import Home
-import torch
 
 # configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 class Assistant:
@@ -27,6 +27,12 @@ class Assistant:
         # init smart home
         self.home = Home(home_name=home_name)
         self.use_llm_handler = True
+        
+        # init logger
+        self.logger = logging.getLogger(__name__)
+        
+        # init tracking TTS language selection
+        self.current_tts_lang = "spa"
         
         # default system prompt if not provided
         self.system_prompt = self._default_system_prompt()
@@ -62,7 +68,7 @@ class Assistant:
             self.chat_llm.load()
             
         # init TTS model with Spanish as default
-        self.tts_model = VITTS(language="spa")
+        self.tts_model = VITTS(language=self.current_tts_lang)
         if not self.tts_model.is_loaded:
             self.tts_model.load()
     
@@ -110,32 +116,9 @@ class Assistant:
                                 elem_classes="text-input-chat"
                             )
                         
+                        with gr.Row():
                             self.send_text_btn = gr.Button("Enviar", elem_classes="send-text-btn")
                             self.audio_mode_btn = gr.Button("Audio", elem_classes="audio-mode-btn")
-                        
-                        # clear chat button
-                        with gr.Row():
-                            self.clear_chat_btn = gr.Button("Limpiar chat", variant="secondary", size="sm")
-                        
-                        # checkbox for LLM processing
-                        with gr.Row():
-                            self.use_llm_checkbox = gr.Checkbox(
-                                label="Procesar comandos con LLM", 
-                                value=True,
-                                info="Activado: usa LLM para procesar comandos. Desactivado: usa expresiones regulares.",
-                                container=False
-                            )
-
-                        # LLM model dropdown
-                        with gr.Row():
-                            self.llm_model_dropdown = gr.Dropdown(
-                                choices=list(ChatLLM.models.keys()),
-                                interactive=True,
-                                container=False,
-                                value="llama3.2-3b",
-                                label="Modelo LLM",
-                                info="Selecciona el modelo de lenguaje a utilizar",
-                            )
 
                     # container for audio mode (hidden initially)        
                     with gr.Column(elem_id="audio-mode-container", visible=False) as audio_mode:
@@ -149,9 +132,36 @@ class Assistant:
                                 label=None,
                             )
 
+                        with gr.Row():
                             # row for the two buttons in audio mode: send and exit
                             self.send_audio_btn = gr.Button("Enviar", elem_classes="send-audio-btn")
                             self.exit_audio_btn = gr.Button("Salir", elem_classes="exit-audio-btn")
+                    
+                    # clear chat button
+                    with gr.Row():
+                        self.clear_chat_btn = gr.Button("Limpiar chat", variant="secondary", size="sm")
+                    
+                    # checkbox for LLM processing
+                    with gr.Row():
+                        self.use_llm_checkbox = gr.Checkbox(
+                            label="Procesar comandos con LLM", 
+                            value=True,
+                            info="Activado: usa LLM para procesar comandos. Desactivado: usa expresiones regulares. Se bloquea en ON para idiomas distintos al español.",
+                            container=False,
+                            # only interactive if the language is Spanish
+                            interactive=(self.current_tts_lang == "spa")
+                        )
+
+                    # LLM model dropdown
+                    with gr.Row():
+                        self.llm_model_dropdown = gr.Dropdown(
+                            choices=list(ChatLLM.models.keys()),
+                            interactive=True,
+                            container=False,
+                            value="llama3.2-3b",
+                            label="Modelo LLM",
+                            info="Selecciona el modelo de lenguaje a utilizar",
+                        )
                     
                     # audio components for TTS
                     self.tts_audio_output = gr.Audio(
@@ -162,36 +172,16 @@ class Assistant:
                     # TTS configuration
                     with gr.Row():                        
                         with gr.Accordion("Configuración de TTS", open=False):
-                            with gr.Column():
-                                self.tts_language = gr.Dropdown(
-                                    choices=[("Español", "spa"), ("English", "eng")],
-                                    interactive=True,
-                                    container=False,
-                                    label="Idioma de la respuesta de voz",
-                                    value="spa"
-                                )
-                                self.tts_speaking_rate = gr.Slider(
-                                    minimum=0.1,
-                                    maximum=10.0,
-                                    step=0.1,
-                                    label="Velocidad de habla",
-                                    value=1.0
-                                )
-                            with gr.Column():
-                                self.tts_noise_scale = gr.Slider(
-                                    minimum=0.1,
-                                    maximum=2.5,
-                                    step=0.05,
-                                    label="Escala de ruido",
-                                    value=0.667
-                                )
-                                self.tts_noise_scale_duration = gr.Slider(
-                                    minimum=0.1,
-                                    maximum=2.0,
-                                    step=0.05,
-                                    label="Duración de la escala de ruido",
-                                    value=0.8
-                                )                        
+                            self.tts_language = gr.Dropdown(
+                                choices=[
+                                    ("Español", "spa"), 
+                                    ("English", "eng")
+                                ],
+                                interactive=True,
+                                container=False,
+                                label="Idioma de la respuesta de voz",
+                                value="spa"
+                            )   
                 
                 # system prompt input and status output
                 with gr.Column():
@@ -219,7 +209,13 @@ class Assistant:
                             "</div>"
                         )             
                     
-                    self.status_output = gr.JSON(label="Estado actual del hogar")
+                    # home status output
+                    self.status_output = gr.JSON(
+                        label="Estado actual del hogar",
+                        height=417
+                    )
+                    
+                    # log output
                     self.log_output = gr.Text(
                         label="Log", 
                         visible=True, 
@@ -243,7 +239,7 @@ class Assistant:
                 outputs=[text_mode, audio_mode]
             )
             
-            # 2.1 Update processing method when checkbox changes
+            # 2.1 update processing method when checkbox changes
             self.use_llm_checkbox.change(
                 fn=self._update_processing_method,
                 inputs=[self.use_llm_checkbox],
@@ -285,11 +281,18 @@ class Assistant:
                 outputs=[self.chat_history, self.chat_state, self.log_output]
             )
 
-            # Add model switching binding
+            # 8. add model switching binding
             self.llm_model_dropdown.change(
                 fn=self._switch_llm_model,
                 inputs=[self.llm_model_dropdown],
                 outputs=[self.log_output]
+            )
+            
+            # 9. add TTS language change handler
+            self.tts_language.change(
+                fn=self._switch_tts_language,
+                inputs=[self.tts_language],
+                outputs=[self.log_output, self.use_llm_checkbox]
             )
 
     def _regex_request_handler(self, user_query: str):
@@ -299,6 +302,8 @@ class Assistant:
         # process request to detect intents
         intent_result = self.home.process_request(user_query, None)
         
+        home_state_json = json.dumps(self.home.state, indent=3)
+        
         # register changes if there was success
         if intent_result.get("success", False):
             num_changes = len(intent_result.get("changes", []))
@@ -307,6 +312,7 @@ class Assistant:
         
         # if intent is not a command or if no intent is detected, don't add additional context
         if not intent_result.get("is_command", False):
+            final_prompt = f"{final_prompt}\nEstado actual del hogar:\n{home_state_json}"
             return final_prompt
         
         # build details of changes only if there are changes detected
@@ -349,7 +355,7 @@ Strictly respond following this exact JSON format:
   "is_command": true/false,
   "is_possible": true/false,
   "updated_state": <instruct>Update the following JSON structure with the values that should be updated. Keep all other values the same as in the current state:</instruct>{home_state_json},
-  "summary": "One line summary of changes made or why the change wasn't possible"
+  "summary": "Provide a concise, one-line summary clearly stating the outcome of the user's requested command or directly addressing their query (e.g. about the home's current state). "
 }}
 
 If the user is not requesting any changes to the home state, set "is_command" to false.
@@ -380,15 +386,15 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
                         self.home.log_event("asistente", "cambios_aplicados_llm", 
                                     "Se han aplicado cambios basados en procesamiento LLM")
                     
-                    # add the summary to the prompt as context
-                    summary = response_data.get("summary", "")
-                    if summary:
-                        final_prompt = f"{final_prompt}\n\nCambios detectados por LLM:\n{summary}"
+                # add the summary to the prompt as context
+                summary = response_data.get("summary", "")
+                if summary:
+                    final_prompt = f"{final_prompt}\n\nCambios detectados por LLM:\n{summary}"
             
             return final_prompt
                 
         except Exception as e:
-            logger.error(f"Error in LLM request handler: {str(e)}")
+            self.logger.error(f"Error in LLM request handler: {str(e)}")
             return final_prompt
 
     def process_text_message(self, text: str, history: List):
@@ -425,17 +431,10 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             
             # generate TTS only after completing the response
             if last_response:
-                language = self.tts_language.value
-                speaking_rate = self.tts_speaking_rate.value
-                noise_scale = self.tts_noise_scale.value
-                noise_scale_duration = self.tts_noise_scale_duration.value
-                
+                # use our tracked language state instead of dropdown value                
                 tts_output = self._generate_tts(
                     last_response,
-                    language=language,
-                    speaking_rate=speaking_rate,
-                    noise_scale=noise_scale,
-                    noise_scale_duration=noise_scale_duration
+                    language=self.current_tts_lang
                 )
                 yield history, tts_output, self.home.state, "Respuesta generada con audio.", history, gr.update(value="")
             else:
@@ -443,7 +442,7 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             
         except Exception as e:
             error_msg = f"Error al procesar la solicitud: {str(e)}"
-            logger.error(error_msg)
+            self.logger.error(error_msg)
             
             if history and history[-1]["role"] == "assistant":
                 history[-1]["content"] = f"Lo siento, ocurrió un problema: {str(e)}"
@@ -487,17 +486,10 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
                 yield history, None, self.home.state, "Procesando respuesta...", history, gr.update(value="")
             
             if last_response:
-                language = self.tts_language.value
-                speaking_rate = self.tts_speaking_rate.value
-                noise_scale = self.tts_noise_scale.value
-                noise_scale_duration = self.tts_noise_scale_duration.value
-                
+                # use our tracked language state instead of dropdown value                
                 tts_output = self._generate_tts(
                     last_response,
-                    language=language,
-                    speaking_rate=speaking_rate,
-                    noise_scale=noise_scale,
-                    noise_scale_duration=noise_scale_duration
+                    language=self.current_tts_lang
                 )
                 yield history, tts_output, self.home.state, "Respuesta generada con audio.", history, gr.update(value="")
             else:
@@ -505,7 +497,7 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             
         except Exception as e:
             error_msg = f"Error al procesar comando de voz: {str(e)}"
-            logger.error(error_msg)
+            self.logger.error(error_msg)
             
             if history and history[-1]["role"] == "assistant":
                 history[-1]["content"] = f"Lo siento, ocurrió un problema: {str(e)}"
@@ -521,10 +513,7 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
     def _generate_tts(
         self, 
         text: str, 
-        language: str = "spa",
-        speaking_rate: float = 1.0,
-        noise_scale: float = 0.667,
-        noise_scale_duration: float = 0.8
+        language: str = "spa"
     ) -> Optional[tuple]:
         """generate speech from text with customizable parameters"""
         if not text:
@@ -534,16 +523,16 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             result = self.tts_model.generate(
                 text=text,
                 language=language,
-                speaking_rate=speaking_rate,
-                noise_scale=noise_scale,
-                noise_scale_duration=noise_scale_duration,
+                speaking_rate=1.0,
+                noise_scale=0.667,
+                noise_scale_duration=0.8,
                 save_path=None
             )
             
             # return the audio_out tuple directly (sample_rate, waveform)
             return result["audio_out"]
         except Exception as e:
-            logger.error(f"Error en generación de voz: {str(e)}")
+            self.logger.error(f"Error en generación de voz: {str(e)}")
             return None
      
     def update_system_prompt(self, new_prompt: str, clear_history: bool, current_history: List) -> Tuple[List, str, List]:
@@ -574,6 +563,12 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
 
     def _update_processing_method(self, use_llm: bool) -> str:
         """update the command processing method"""
+        # if the language is not Spanish, force LLM to True regardless of the input
+        if self.current_tts_lang != "spa":
+            self.use_llm_handler = True
+            return "Procesado LLM forzado: solo se puede desactivar en idioma español."
+        
+        # if the language is Spanish, allow changing the method
         self.use_llm_handler = use_llm
         if use_llm:
             return "Cambio a procesado de peticiones con LLM."
@@ -617,6 +612,56 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             error_msg = f"Error al actualizar el modelo: {str(e)}"
             self.logger.error(error_msg)
             return error_msg
+
+    def _switch_tts_language(self, language: str) -> str:
+        """handle TTS language change and update the model if necessary"""
+        try:
+            # update our internal variable to track the current language
+            self.current_tts_lang = language
+            self.logger.info(f"Idioma actualizado a: {language}")
+            
+            # update LLM checkbox state based on language
+            # if language is not Spanish, force LLM processing and disable the checkbox
+            if language != "spa":
+                self.use_llm_handler = True
+                # configuración visual del checkbox se actualizará mediante el retorno
+                checkbox_update = gr.update(value=True, interactive=False)
+                self.logger.info("Procesamiento LLM forzado (idioma no español)")
+            else:
+                # if language is Spanish, allow user to choose
+                checkbox_update = gr.update(interactive=True)
+                self.logger.info("Checkbox de procesamiento LLM habilitado (idioma español)")
+            
+            if not hasattr(self, 'tts_model') or not self.tts_model.is_loaded:
+                self.tts_model = VITTS(language=language)
+                self.tts_model.load()
+                message = f"Modelo TTS inicializado en {language}"
+            
+            # if the language is the same, no need to switch
+            elif self.tts_model.language == language:
+                message = f"Modelo TTS ya está configurado en {language}"
+            else:
+                # update the model with the new language
+                self.logger.info(f"Cambiando idioma TTS de {self.tts_model.language} a {language}")
+                
+                # properly unload the current model to free memory
+                self.tts_model.unload()
+                
+                # clear CUDA cache if available
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                # create a new model with the updated language
+                self.tts_model = VITTS(language=language)
+                self.tts_model.load()
+                message = f"Idioma TTS cambiado a: {language}"
+            
+            return message, checkbox_update
+            
+        except Exception as e:
+            error_msg = f"Error al cambiar el idioma TTS: {str(e)}"
+            self.logger.error(error_msg)
+            return error_msg, gr.update()
 
     def launch(self, share=True):
         """launch the gradio interface"""
