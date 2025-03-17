@@ -16,23 +16,22 @@ class Home:
                     "television": {
                         "estado": "apagado"
                     },
-                    "termostato": {
+                    "luz": {
                         "estado": "apagado", 
-                        "temperatura_celsius": 22
-                        }
+                    }
                 },
                 "cocina": {
-                    "luz": {
-                        "estado": "apagado"
+                    "nevera": {
+                        "estado": "encendido", 
+                        "temperatura_celsius": "5"
                     },
                     "horno": {
                         "estado": "apagado", 
                         "temperatura_celsius": "0"
                     },
-                    "nevera": {
-                        "estado": "encendido", 
-                        "temperatura_celsius": "4"
-                    }
+                    "luz": {
+                        "estado": "apagado"
+                    },
                 },
             }
         }
