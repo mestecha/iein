@@ -151,7 +151,9 @@ class WhisperASR(BaseLLM):
 
     def transcribe(
         self,
-        audio_data: Any,  # Either a numpy array or a tuple (sample_rate, numpy array)
+        audio_data: Any,  # either a numpy array or a tuple (sample_rate, numpy array)
+        task: Optional[str] = None, 
+        language: Optional[str] = None,
         **decoding_options: Any
     ) -> str:
         if audio_data is None:
@@ -169,8 +171,8 @@ class WhisperASR(BaseLLM):
             return_attention_mask=True
         ).to(self.device)
         generation_kwargs = {
-            "task": self.task,
-            "language": self.language,
+            "task": task if task else self.task,
+            "language": language if language else self.language,
             **decoding_options
         }
         with torch.no_grad():

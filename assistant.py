@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple, Dict
 
 import gradio as gr
 import torch
+import numpy as np
 
 from models import ChatLLM, WhisperASR, VITTS
 from home import Home
@@ -21,6 +22,30 @@ class Assistant:
     and text-to-speech to control a smart home using natural language
     """
     
+    # Language configuration for easy scaling
+    LANGUAGES = {
+        # key: TTS code
+        "spa": {
+            "name": "Español",
+            "asr_code": "es",
+            "allow_regex": True,  # Spanish allows regex processing
+            "display_name": "Español"
+        },
+        "eng": {
+            "name": "English",
+            "asr_code": "en",
+            "allow_regex": False,  # English requires LLM processing
+            "display_name": "English"
+        }
+        # Add more languages as needed following the same structure
+        # "fra": {
+        #     "name": "French",
+        #     "asr_code": "fr",
+        #     "allow_regex": False,
+        #     "display_name": "Français"
+        # },
+    }
+    
     def __init__(self, 
                  home_name: str = "Casa Interactiva",
                  system_prompt: Optional[str] = None):
@@ -31,8 +56,8 @@ class Assistant:
         # init logger
         self.logger = logging.getLogger(__name__)
         
-        # init tracking TTS language selection
-        self.current_tts_lang = "spa"
+        # init tracking language (using TTS format)
+        self.current_language = "spa" # spanish as default language
         
         # default system prompt if not provided
         self.system_prompt = self._default_system_prompt()
@@ -46,6 +71,20 @@ class Assistant:
         self.demo = gr.Blocks(title="Smart Home Assistant")
         self.ui()
         
+    def _get_asr_language_code(self) -> str:
+        """Get the ASR language code for the current language"""
+        return self.LANGUAGES.get(self.current_language, {}).get("asr_code", "es")
+    
+    def _get_tts_language_code(self) -> str:
+        """Get the TTS language code (same as current_language if valid)"""
+        if self.current_language in self.LANGUAGES:
+            return self.current_language
+        
+    
+    def _is_regex_allowed(self) -> bool:
+        """Check if regex processing is allowed for the current language"""
+        return self.LANGUAGES.get(self.current_language, {}).get("allow_regex", False)
+    
     def _default_system_prompt(self) -> str:
         return (
             "Eres un asistente de hogar inteligente. "
@@ -68,7 +107,7 @@ class Assistant:
             self.chat_llm.load()
             
         # init TTS model with Spanish as default
-        self.tts_model = VITTS(language=self.current_tts_lang)
+        self.tts_model = VITTS(language=self.current_language)
         if not self.tts_model.is_loaded:
             self.tts_model.load()
     
@@ -150,7 +189,7 @@ class Assistant:
                             info="Activado: usa LLM para procesar comandos. Desactivado: usa expresiones regulares. Se bloquea en ON para idiomas distintos al español.",
                             container=False,
                             # only interactive if the language is Spanish
-                            interactive=(self.current_tts_lang == "spa")
+                            interactive=(self.current_language == "spa")
                         )
 
                     # LLM model dropdown
@@ -175,14 +214,14 @@ class Assistant:
                         with gr.Accordion("Configuración de TTS", open=False):
                             self.tts_language = gr.Dropdown(
                                 choices=[
-                                    ("Español", "spa"), 
-                                    ("English", "eng")
+                                    (lang_info["display_name"], lang_code) 
+                                    for lang_code, lang_info in self.LANGUAGES.items()
                                 ],
                                 interactive=True,
                                 container=False,
                                 label="Idioma de la respuesta de voz",
                                 value="spa"
-                            )   
+                            )
                 
                 # system prompt input and status output
                 with gr.Column():
@@ -458,10 +497,10 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             
             # generate TTS only after completing the response
             if last_response:
-                # use our tracked language state instead of dropdown value                
+                # use TTS format for current language
                 tts_output = self._generate_tts(
                     last_response,
-                    language=self.current_tts_lang
+                    language=self._get_tts_language_code()
                 )
                 yield history, tts_output, self.home.state, "Respuesta generada con audio.", history, gr.update(value="")
             else:
@@ -486,7 +525,10 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
         
         try:
             # transcribe the audio using Whisper ASR
-            transcription = self.whisper_asr.transcribe(audio)
+            transcription = self.whisper_asr.transcribe(
+                audio, 
+                language=self._get_asr_language_code() # Use mapped ASR code (es/en)
+            )
             
             if not transcription or transcription.strip() == "":
                 yield history, None, self.home.state, "No se ha podido transcribir el audio.", history, gr.update(value="")
@@ -513,10 +555,10 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
                 yield history, None, self.home.state, "Procesando respuesta...", history, gr.update(value="")
             
             if last_response:
-                # use our tracked language state instead of dropdown value                
+                # use TTS format for current language
                 tts_output = self._generate_tts(
                     last_response,
-                    language=self.current_tts_lang
+                    language=self._get_tts_language_code()
                 )
                 yield history, tts_output, self.home.state, "Respuesta generada con audio.", history, gr.update(value="")
             else:
@@ -547,9 +589,12 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
             return None
         
         try:
+            # ensure we're using TTS format
+            tts_language = self._get_tts_language_code() if language == self.current_language else language
+            
             result = self.tts_model.generate(
                 text=text,
-                language=language,
+                language=tts_language,
                 speaking_rate=1.0,
                 noise_scale=0.667,
                 noise_scale_duration=0.8,
@@ -590,12 +635,12 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
 
     def _update_processing_method(self, use_llm: bool) -> str:
         """update the command processing method"""
-        # if the language is not Spanish, force LLM to True regardless of the input
-        if self.current_tts_lang != "spa":
+        # Check if regex is allowed for current language
+        if not self._is_regex_allowed():
             self.use_llm_handler = True
-            return "Procesado LLM forzado: solo se puede desactivar en idioma español."
+            return f"Procesado LLM forzado: solo disponible en {self.LANGUAGES.get('spa', {}).get('display_name', 'Español')}."
         
-        # if the language is Spanish, allow changing the method
+        # If regex is allowed, user can choose
         self.use_llm_handler = use_llm
         if use_llm:
             return "Cambio a procesado de peticiones con LLM."
@@ -643,45 +688,42 @@ Ensure that your JSON response is valid and properly formatted. The "updated_sta
     def _switch_tts_language(self, language: str) -> str:
         """handle TTS language change and update the model if necessary"""
         try:
-            # update our internal variable to track the current language
-            self.current_tts_lang = language
-            self.logger.info(f"Idioma actualizado a: {language}")
+            # Update internal language tracking
+            self.current_language = language
+            language_info = self.LANGUAGES.get(language, {})
+            language_name = language_info.get("name", language)
+            asr_code = language_info.get("asr_code", "unknown")
             
-            # update LLM checkbox state based on language
-            # if language is not Spanish, force LLM processing and disable the checkbox
-            if language != "spa":
+            self.logger.info(f"Idioma actualizado a: {language_name} (TTS: {language}, ASR: {asr_code})")
+            
+            # Update LLM checkbox based on whether regex is allowed for this language
+            allow_regex = language_info.get("allow_regex", False)
+            if not allow_regex:
                 self.use_llm_handler = True
-                # configuración visual del checkbox se actualizará mediante el retorno
                 checkbox_update = gr.update(value=True, interactive=False)
-                self.logger.info("Procesamiento LLM forzado (idioma no español)")
+                self.logger.info(f"Procesamiento LLM forzado (idioma {language_name})")
             else:
-                # if language is Spanish, allow user to choose
                 checkbox_update = gr.update(interactive=True)
-                self.logger.info("Checkbox de procesamiento LLM habilitado (idioma español)")
+                self.logger.info(f"Checkbox de procesamiento LLM habilitado (idioma {language_name})")
             
+            # Handle TTS model loading/switching
             if not hasattr(self, 'tts_model') or not self.tts_model.is_loaded:
                 self.tts_model = VITTS(language=language)
                 self.tts_model.load()
-                message = f"Modelo TTS inicializado en {language}"
-            
-            # if the language is the same, no need to switch
+                message = f"Modelo TTS inicializado en {language_name}"
             elif self.tts_model.language == language:
-                message = f"Modelo TTS ya está configurado en {language}"
+                message = f"Modelo TTS ya está configurado en {language_name}"
             else:
-                # update the model with the new language
+                # Properly switch TTS model
                 self.logger.info(f"Cambiando idioma TTS de {self.tts_model.language} a {language}")
-                
-                # properly unload the current model to free memory
                 self.tts_model.unload()
                 
-                # clear CUDA cache if available
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 
-                # create a new model with the updated language
                 self.tts_model = VITTS(language=language)
                 self.tts_model.load()
-                message = f"Idioma TTS cambiado a: {language}"
+                message = f"Idioma TTS cambiado a: {language_name}"
             
             return message, checkbox_update
             
