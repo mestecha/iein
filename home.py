@@ -35,8 +35,19 @@ class Home:
                 },
             }
         }
+        
+        # Store the initial state for reset functionality
+        import copy
+        self.initial_state = copy.deepcopy(self.state)
+        
         # precompile command patterns
         self.command_patterns = self._build_command_patterns()
+
+    def reset_to_initial_state(self) -> None:
+        """reset the home state to its initial values"""
+        import copy
+        self.state = copy.deepcopy(self.initial_state)
+        self.log_event("system", "reset", "Estado del hogar reiniciado a valores iniciales")
 
     def log_event(self, category: str, action: str, details: str) -> None:
         """log an event with timestamp"""

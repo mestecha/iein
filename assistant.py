@@ -3,7 +3,7 @@ import os
 import time
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import gradio as gr
 import torch
@@ -101,7 +101,8 @@ class Assistant:
                         elem_id="chatbox", 
                         elem_classes="chat-container", 
                         label="", 
-                        type="messages"
+                        type="messages",
+                        height=600
                     )
                     self.chat_state = gr.State([])
                                     
@@ -203,7 +204,7 @@ class Assistant:
                             )   
                         # system prompt update info/warning
                         gr.HTML(
-                            "<div style='width: 150%; margin-top: -15px; font-size: 12px; color: #666;'>"
+                            "<div style='width: 130%; margin-top: -15px; font-size: 12px; color: #666;'>"
                             "Actualizar el prompt del sistema puede cambiar el comportamiento del asistente. "
                             "Se recomienda limpiar el historial del chat para evitar confusiones."
                             "</div>"
@@ -212,8 +213,16 @@ class Assistant:
                     # home status output
                     self.status_output = gr.JSON(
                         label="Estado actual del hogar",
-                        height=417
+                        height=700
                     )
+                    
+                    # reset button for home state
+                    with gr.Row():
+                        self.reset_home_btn = gr.Button(
+                            "Reiniciar estado del hogar", 
+                            variant="primary", 
+                            size="sm"
+                        )
                     
                     # log output
                     self.log_output = gr.Text(
@@ -294,6 +303,24 @@ class Assistant:
                 inputs=[self.tts_language],
                 outputs=[self.log_output, self.use_llm_checkbox]
             )
+            
+            # 10. add home state reset button handler
+            self.reset_home_btn.click(
+                fn=self.reset_home_state,
+                inputs=[],
+                outputs=[self.status_output, self.log_output]
+            )
+
+    def reset_home_state(self) -> Tuple[Dict, str]:
+        """reset the home state to its initial values"""
+        try:
+            # call the reset method on the home object
+            self.home.reset_to_initial_state()
+            return self.home.state, "Estado del hogar reiniciado con éxito."
+        except Exception as e:
+            error_msg = f"Error al reiniciar el estado: {str(e)}"
+            self.logger.error(error_msg)
+            return self.home.state, error_msg
 
     def _regex_request_handler(self, user_query: str):
         """handle user requests using regex pattern matching"""

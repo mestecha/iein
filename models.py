@@ -191,7 +191,6 @@ class ChatLLM(BaseLLM):
         "phi4-mini": "microsoft/Phi-4-mini-instruct",
         "qwen2.5-3b": "Qwen/Qwen2.5-3B-Instruct",
         "llama3.2-3b": "PASI1028/Llama-3.2-3B-Instruct",
-        "deepseek-r1-1.5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     }
 
     def __init__(
